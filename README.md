@@ -1,11 +1,13 @@
-# AEGIS Capture Windows
+# AEGIS Capture - Windows
 
-Desktop app that drags a region over your MT5 chart, captures screenshots every 3s, and sends to AEGIS cloud for BUY/SELL signals.
+Screen region capture for MT5. Sends PNGs to AEGIS Cloud every 3s.
 
-## 1. Install
-Download Python 3.10+ from python.org
+## Features
+- Captures specific screen region, not full desktop
+- Sends frames to AEGIS Cloud API
+- Includes AEGIS_Executor.mq5 for MT5
 
-## 2. Build EXE
-```bash
-pip install -r requirements.txt
-pyinstaller aegis_capture.spec
+## How to Build
+Requirements: Windows 10+, Python 3.10+, Inno Setup 6
+
+1. Install dependencies:
