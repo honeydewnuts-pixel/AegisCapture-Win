@@ -1,30 +1,23 @@
-"""Local settings for AEGIS Capture (Windows)."""
-from __future__ import annotations
-
 import json
-from pathlib import Path
+import os
 
-CONFIG_PATH = Path.home() / ".aegis" / "capture_config.json"
+CONFIG_FILE = "aegis_config.json"
 
-DEFAULTS = {
+DEFAULT_CONFIG = {
     "server_url": "https://aegis-api-0z1p.onrender.com",
     "account_id": "",
     "api_key": "",
-    "device_id": "",
-    "interval_sec": 3,
-    "region": None,  # {left, top, width, height}
-    "auto_start": False,
+    "device_id": "win-device-001",
+    "interval_sec": 3.0,
+    "region": {"x": 200, "y": 150, "width": 640, "height": 400}
 }
 
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return DEFAULT_CONFIG
 
-def load() -> dict:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if CONFIG_PATH.exists():
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        return {**DEFAULTS, **data}
-    return dict(DEFAULTS)
-
-
-def save(cfg: dict) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+def save_config(cfg):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(cfg, f, indent=4)
