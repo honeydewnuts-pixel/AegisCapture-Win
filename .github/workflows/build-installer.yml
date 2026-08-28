@@ -1,0 +1,32 @@
+name: Build Windows Installer
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: PyInstaller
+        run: pyinstaller aegis_capture.spec
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+      - name: Compile installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" AEGIS_Setup.iss
+      - name: Upload Setup EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: AEGIS_Capture_Setup
+          path: Output/AEGIS_Capture_Setup.exe
+      - name: Upload portable EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: AEGIS_Capture_portable
+          path: dist/AEGIS_Capture.exe

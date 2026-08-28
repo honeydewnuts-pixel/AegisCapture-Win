@@ -1,10 +1,8 @@
-; AEGIS Capture Windows Installer
-; Compiled with Inno Setup 6
-
+; AEGIS Capture Windows Installer — Inno Setup 6
 #define MyAppName "AEGIS Capture"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "LeverageFx / Honeydewnuts"
-#define MyAppURL "https://aegis-api-0z1p.onrender.com"
+#define MyAppURL "https://leveragefx.co"
 
 [Setup]
 AppId={{AEGIS-CAPTURE-WIN-2026}
@@ -19,7 +17,7 @@ OutputBaseFilename=AEGIS_Capture_Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -28,17 +26,16 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; Main EXE from PyInstaller
-Source: "dist\AEGIS_Capture\AEGIS_Capture.exe"; DestDir: "{app}"; Flags: ignoreversion
-
-; All supporting files from PyInstaller folder
-Source: "dist\AEGIS_Capture\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-; MT5 EA - THIS IS THE NEW LINE
+; One-file PyInstaller output
+Source: "dist\AEGIS_Capture.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "mq5\AEGIS_Executor.mq5"; DestDir: "{app}\mq5"; Flags: ignoreversion
+Source: "assets\mt5_color_match_guide.jpg"; DestDir: "{app}\assets"; Flags: ignoreversion
+Source: "guides\mt5_color_match_guide.jpg"; DestDir: "{app}\guides"; Flags: ignoreversion
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\AEGIS_Capture.exe"
+Name: "{group}\MT5 Color Guide"; Filename: "{app}\assets\mt5_color_match_guide.jpg"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\AEGIS_Capture.exe"; Tasks: desktopicon
 
