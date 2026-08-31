@@ -1,241 +1,139 @@
-name: Build and Release AegisCapture
+name: Build, Sign & Release (Windows)
 
+# Manual trigger by default — this creates a public GitHub Release and
+# a signed executable, so it should be a deliberate action, not
+# something that fires on every push. Change to `push: branches:[main]`
+# once you're happy with that.
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
     inputs:
       build_number:
-        description: 'Manual build number (optional)'
-        required: false
-        default: ''
+        description: "Build number for the tag (v{date}-{build_number})"
+        required: true
+        default: "01"
+
+permissions:
+  contents: write   # required to create tags/releases
 
 jobs:
-  build-windows:
-    name: Build Windows Executable
+  build-sign-release:
     runs-on: windows-latest
-    
     steps:
-      - name: Checkout Repository
+      - name: Checkout latest main
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - name: Get short commit hash
+        id: vars
+        shell: bash
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          echo "tag=v$(date -u +%Y-%m-%d)-${{ github.event.inputs.build_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          dotnet-version: |
-            8.0.x
-            6.0.x
+          python-version: "3.11"
 
-      - name: Restore Dependencies
-        run: dotnet restore
-
-      - name: Build Windows Executable
+      - name: Install dependencies
         run: |
-          dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish/win-x64
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Sign Windows Executable (if certificate available)
-        if: env.SIGNING_CERTIFICATE != ''
+      - name: Preflight - check bundled assets exist
+        shell: bash
         run: |
-          $certBytes = [System.Convert]::FromBase64String($env:SIGNING_CERTIFICATE)
-          Set-Content -Path certificate.pfx -Value $certBytes -AsByteStream
-          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
-          signtool sign /fd SHA256 /f certificate.pfx /p $env:SIGNING_PASSWORD /tr http://timestamp.digicert.com /td SHA256 /a ./publish/win-x64/AegisCapture-Win.exe
-        env:
-          SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
-          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
-
-      - name: Verify Windows Executable
-        run: |
-          if (Test-Path ./publish/win-x64/AegisCapture-Win.exe) {
-            $fileInfo = Get-Item ./publish/win-x64/AegisCapture-Win.exe
-            Write-Host "Windows executable created: $($fileInfo.Name) ($($fileInfo.Length) bytes)"
-          } else {
-            Write-Error "Windows executable not found!"
-            exit 1
-          }
-
-      - name: Upload Windows Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AegisCapture-Win
-          path: ./publish/win-x64/AegisCapture-Win.exe
-          retention-days: 7
-
-  build-mac:
-    name: Build macOS Application
-    runs-on: macos-latest
-    
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: |
-            8.0.x
-            6.0.x
-
-      - name: Restore Dependencies
-        run: dotnet restore
-
-      - name: Build macOS Application Bundle
-        run: |
-          dotnet publish -c Release -r osx-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish/osx-x64
-          # Create .app bundle structure
-          mkdir -p ./publish/AegisCapture-Mac.app/Contents/MacOS
-          cp ./publish/osx-x64/AegisCapture-Mac ./publish/AegisCapture-Mac.app/Contents/MacOS/
-          # Create Info.plist
-          cat > ./publish/AegisCapture-Mac.app/Contents/Info.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleExecutable</key>
-            <string>AegisCapture-Mac</string>
-            <key>CFBundleIdentifier</key>
-            <string>com.aegiscapture.mac</string>
-            <key>CFBundleName</key>
-            <string>AegisCapture-Mac</string>
-            <key>CFBundleVersion</key>
-            <string>1.0.0</string>
-            <key>CFBundleShortVersionString</key>
-            <string>1.0.0</string>
-          </dict>
-          </plist>
-          EOF
-
-      - name: Sign macOS Application (if certificate available)
-        if: env.APPLE_CERTIFICATE != ''
-        run: |
-          echo "${{ secrets.APPLE_CERTIFICATE }}" | base64 --decode > certificate.p12
-          security create-keychain -p temp build.keychain
-          security import certificate.p12 -k build.keychain -P "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k temp build.keychain
-          /usr/bin/codesign --force --sign "${{ secrets.APPLE_SIGNING_IDENTITY }}" --timestamp --options runtime ./publish/AegisCapture-Mac.app
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-
-      - name: Verify macOS Application
-        run: |
-          if [ -d "./publish/AegisCapture-Mac.app" ]; then
-            echo "macOS app bundle created successfully"
-            du -sh ./publish/AegisCapture-Mac.app
-          else
-            echo "Error: macOS app bundle not found!"
+          missing=0
+          for f in "assets/mt5_color_match_guide.jpg" "guides/mt5_color_match_guide.jpg" "mq5/AEGIS_Executor.mq5"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Missing required asset: $f"
+              missing=1
+            fi
+          done
+          if [ "$missing" = "1" ]; then
+            echo "::error::One or more bundled assets are missing. See aegis_capture.spec comments for how to build without them if that's intentional."
             exit 1
           fi
 
-      - name: Create macOS DMG (optional)
+      - name: Build with PyInstaller
+        run: pyinstaller aegis_capture.spec
+
+      - name: Rename build output to requested filename
+        shell: bash
         run: |
-          brew install create-dmg
-          create-dmg \
-            --volname "AegisCapture-Mac" \
-            --window-pos 200 120 \
-            --window-size 800 400 \
-            --icon-size 100 \
-            --icon "AegisCapture-Mac.app" 200 190 \
-            --hide-extension "AegisCapture-Mac.app" \
-            --app-drop-link 600 185 \
-            ./publish/AegisCapture-Mac.dmg \
-            ./publish/AegisCapture-Mac.app
+          mkdir -p release_out
+          cp "dist/AEGIS_Capture.exe" "release_out/AegisCapture-Win.exe"
 
-      - name: Upload macOS Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AegisCapture-Mac
-          path: |
-            ./publish/AegisCapture-Mac.app
-            ./publish/AegisCapture-Mac.dmg
-          retention-days: 7
-
-  create-release:
-    name: Create GitHub Release
-    needs: [build-windows, build-mac]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      
-    steps:
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./artifacts
-
-      - name: Generate Version Tag
-        id: version
+      # ------------------------------------------------------------------
+      # Code signing. Requires these repo secrets to be set beforehand
+      # (Settings -> Secrets and variables -> Actions):
+      #   WINDOWS_CERT_PFX_BASE64  - your Authenticode .pfx, base64-encoded
+      #   WINDOWS_CERT_PASSWORD    - the .pfx password
+      # If these secrets are absent, this step is skipped and the exe
+      # ships unsigned (Windows SmartScreen will warn users).
+      # ------------------------------------------------------------------
+      - name: Sign executable
+        if: ${{ env.WINDOWS_CERT_PFX_BASE64 != '' }}
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          BUILD_DATE=$(date +%Y-%m-%d)
-          if [ -n "${{ github.event.inputs.build_number }}" ]; then
-            BUILD_NUM="${{ github.event.inputs.build_number }}"
-          else
-            BUILD_NUM="${{ github.run_number }}"
-          fi
-          VERSION="v${BUILD_DATE}-$(printf "%02d" $BUILD_NUM)"
-          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-          echo "TAG=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Created version: ${VERSION}"
+          $certBytes = [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", $certBytes)
+          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" |
+            Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1 -ExpandProperty FullName
+          & $signtool sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:WINDOWS_CERT_PASSWORD" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "release_out\AegisCapture-Win.exe"
+          & $signtool verify /pa "release_out\AegisCapture-Win.exe"
 
-      - name: Prepare Release Assets
+      - name: Warn if unsigned
+        if: ${{ env.WINDOWS_CERT_PFX_BASE64 == '' }}
+        run: echo "::warning::WINDOWS_CERT_PFX_BASE64 secret not set - shipping an UNSIGNED executable. Add the secret to enable signing."
+
+      - name: Compile Inno Setup installer
+        shell: pwsh
         run: |
-          mkdir -p ./release-assets
-          # Windows executable
-          if [ -f "./artifacts/AegisCapture-Win/AegisCapture-Win.exe" ]; then
-            cp "./artifacts/AegisCapture-Win/AegisCapture-Win.exe" "./release-assets/"
-            echo "Added Windows executable"
-          fi
-          # macOS app bundle
-          if [ -d "./artifacts/AegisCapture-Mac/AegisCapture-Mac.app" ]; then
-            cp -r "./artifacts/AegisCapture-Mac/AegisCapture-Mac.app" "./release-assets/"
-            echo "Added macOS app bundle"
-          fi
-          # macOS DMG
-          if [ -f "./artifacts/AegisCapture-Mac/AegisCapture-Mac.dmg" ]; then
-            cp "./artifacts/AegisCapture-Mac/AegisCapture-Mac.dmg" "./release-assets/"
-            echo "Added macOS DMG"
-          fi
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" AEGIS_Setup.iss
+          Copy-Item "Output\AEGIS_Capture_Setup.exe" "release_out\AegisCapture-Win-Setup.exe"
+
+      - name: Sign installer
+        if: ${{ env.WINDOWS_CERT_PFX_BASE64 != '' }}
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" |
+            Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1 -ExpandProperty FullName
+          & $signtool sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:WINDOWS_CERT_PASSWORD" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "release_out\AegisCapture-Win-Setup.exe"
+
+      - name: Create tag
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.vars.outputs.tag }}
+          git push origin ${{ steps.vars.outputs.tag }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.TAG }}
-          name: Release ${{ steps.version.outputs.TAG }}
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "AEGIS Capture (Windows) ${{ steps.vars.outputs.tag }}"
           body: |
-            ## AegisCapture Release ${{ steps.version.outputs.TAG }}
-            
-            ### 🚀 Features
-            - Auto-capture from mobile app
-            - Real-time screenshot processing
-            - AEGIS rule engine integration
-            
-            ### 📦 Downloads
-            - **Windows**: `AegisCapture-Win.exe`
-            - **macOS**: `AegisCapture-Mac.app` or `AegisCapture-Mac.dmg`
-            
-            ### 🔧 Installation
-            See README for installation instructions.
-            
-            ### 📝 Changelog
-            - Built from latest main branch
-            - Signed executables
-            - All dependencies included
+            Automated build from commit `${{ steps.vars.outputs.sha_short }}` on `main`.
+            Signed: ${{ env.WINDOWS_CERT_PFX_BASE64 != '' }}
           files: |
-            ./release-assets/*
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            release_out/AegisCapture-Win.exe
+            release_out/AegisCapture-Win-Setup.exe
 
-      - name: Output Release URL
+      - name: Summary
+        shell: bash
         run: |
-          REPO_NAME=$(echo "${{ github.repository }}" | cut -d'/' -f2)
-          echo "Release URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.TAG }}"
-          echo "## Release Created Successfully" >> $GITHUB_STEP_SUMMARY
-          echo "Release Tag: ${{ steps.version.outputs.TAG }}" >> $GITHUB_STEP_SUMMARY
-          echo "Release URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.TAG }}" >> $GITHUB_STEP_SUMMARY
+          echo "### AEGIS Capture (Windows) release" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag: ${{ steps.vars.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: ${{ steps.vars.outputs.sha_short }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Release: see the Releases page for this repo" >> "$GITHUB_STEP_SUMMARY"
